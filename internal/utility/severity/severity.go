@@ -2,6 +2,7 @@
 package severity
 
 import (
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -70,19 +71,34 @@ func CalculateScore(severity *osvschema.Severity) (float64, string, error) {
 	return score, rating, err
 }
 
+// CalculateOverallScore returns the highest score and its rating across all
+// severity entries of a record.
+//
+// An entry that cannot be parsed is skipped instead of aborting the whole
+// aggregation, so a single malformed vector can no longer discard the score
+// of the other, well-formed vectors carried by the same record. The parse
+// errors are only reported when no entry yielded a usable score at all, in
+// which case the result stays at the unknown (-1, "UNKNOWN") convention.
 func CalculateOverallScore(severities []*osvschema.Severity) (float64, string, error) {
 	maxScore := -1.0
 	maxRating := string(UnknownRating)
+	var errs []error
 
 	for _, severity := range severities {
 		score, rating, err := CalculateScore(severity)
 		if err != nil {
-			return -1, string(UnknownRating), err
+			errs = append(errs, err)
+
+			continue
 		}
 		if score > maxScore {
 			maxScore = score
 			maxRating = rating
 		}
+	}
+
+	if maxScore < 0 && len(errs) > 0 {
+		return -1, string(UnknownRating), errors.Join(errs...)
 	}
 
 	return maxScore, maxRating, nil
